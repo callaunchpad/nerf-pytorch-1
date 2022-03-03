@@ -7,15 +7,18 @@ import numpy as np
 import torch
 import torchvision
 import yaml
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_blender_data, load_llff_data, meshgrid_xy, models,
                   mse2psnr, run_one_iter_of_nerf)
 
+import wandb
+
 
 def main():
+    wandb.init(project="stock_nerf", entity="reconstructor")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -28,6 +31,7 @@ def main():
         help="Path to load saved checkpoint from.",
     )
     configargs = parser.parse_args()
+    wandb.config = vars(configargs)
 
     # Read config file.
     cfg = None
@@ -145,7 +149,7 @@ def main():
     # Setup logging.
     logdir = os.path.join(cfg.experiment.logdir, cfg.experiment.id)
     os.makedirs(logdir, exist_ok=True)
-    writer = SummaryWriter(logdir)
+    # writer = SummaryWriter(logdir)
     # Write out config parameters.
     with open(os.path.join(logdir, "config.yml"), "w") as f:
         f.write(cfg.dump())  # cfg, f, default_flow_style=False)
@@ -278,11 +282,18 @@ def main():
                 + " PSNR: "
                 + str(psnr)
             )
-        writer.add_scalar("train/loss", loss.item(), i)
-        writer.add_scalar("train/coarse_loss", coarse_loss.item(), i)
+        # writer.add_scalar("train/loss", loss.item(), i)
+        wandb.log({
+                "iter": i, 
+                "train/loss": loss.item(),
+                "train/coarse_loss": coarse_loss.item(),
+                "train/psnr": psnr,
+            })
+        # writer.add_scalar("train/coarse_loss", coarse_loss.item(), i)
         if rgb_fine is not None:
-            writer.add_scalar("train/fine_loss", fine_loss.item(), i)
-        writer.add_scalar("train/psnr", psnr, i)
+            # writer.add_scalar("train/fine_loss", fine_loss.item(), i)
+            wandb.log({"train/fine_loss": fine_loss.item()})
+        # writer.add_scalar("train/psnr", psnr, i)
 
         # Validation
         if (
@@ -345,22 +356,37 @@ def main():
                     loss = coarse_loss
                 loss = coarse_loss + fine_loss
                 psnr = mse2psnr(loss.item())
-                writer.add_scalar("validation/loss", loss.item(), i)
-                writer.add_scalar("validation/coarse_loss", coarse_loss.item(), i)
-                writer.add_scalar("validataion/psnr", psnr, i)
-                writer.add_image(
-                    "validation/rgb_coarse", cast_to_image(rgb_coarse[..., :3]), i
-                )
+                # writer.add_scalar("validation/loss", loss.item(), i)
+                # writer.add_scalar("validation/coarse_loss", coarse_loss.item(), i)
+                # writer.add_scalar("validataion/psnr", psnr, i)
+
+                wandb.log({
+                    "iter": i,
+                    "validation/loss": loss.item(),
+                    "validation/coarse_loss": coarse_loss.item(),
+                    "validation/psnr": psnr,
+                    "validation/rgb_coarse": wandb.Image(cast_to_image_wandb(rgb_coarse[..., :3]))
+                })
+
+                # writer.add_image(
+                #     "validation/rgb_coarse", cast_to_image(rgb_coarse[..., :3]), i
+                # )
                 if rgb_fine is not None:
-                    writer.add_image(
-                        "validation/rgb_fine", cast_to_image(rgb_fine[..., :3]), i
-                    )
-                    writer.add_scalar("validation/fine_loss", fine_loss.item(), i)
-                writer.add_image(
-                    "validation/img_target",
-                    cast_to_image(target_ray_values[..., :3]),
-                    i,
-                )
+                    # writer.add_image(
+                    #     "validation/rgb_fine", cast_to_image(rgb_fine[..., :3]), i
+                    # )
+                    # writer.add_scalar("validation/fine_loss", fine_loss.item(), i)
+                    # writer.add_image(
+                    #     "validation/img_target",
+                    #     cast_to_image(target_ray_values[..., :3]),
+                    #     i,
+                    # )
+
+                    wandb.log({
+                        "validation/rgb_fine": wandb.Image(cast_to_image_wandb(rgb_fine[..., :3])),
+                        "validation/fine_loss": fine_loss.item(),
+                        "validation/img_target": cast_to_image(target_ray_values[..., :3])
+                    })
                 tqdm.write(
                     "Validation loss: "
                     + str(loss.item())
@@ -397,6 +423,13 @@ def cast_to_image(tensor):
     img = np.array(torchvision.transforms.ToPILImage()(tensor.detach().cpu()))
     # Map back to shape (3, H, W), as tensorboard needs channels first.
     img = np.moveaxis(img, [-1], [0])
+    return img
+
+def cast_to_image_wandb(tensor):
+        # Input tensor is (H, W, 3). Convert to (3, H, W).
+    tensor = tensor.permute(2, 0, 1)
+    # Conver to PIL Image and then np.array (output shape: (H, W, 3))
+    img = np.array(torchvision.transforms.ToPILImage()(tensor.detach().cpu()))
     return img
 
 
