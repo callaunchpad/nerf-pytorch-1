@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+import pwd
 import time
 
 import numpy as np
@@ -18,7 +19,8 @@ import wandb
 
 
 def main():
-    wandb.init(project="stock_nerf", entity="reconstructor")
+    username = pwd.getpwuid(os.getuid()).pw_name
+    wandb.init(project=username + "_nerf", entity="reconstructor")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
